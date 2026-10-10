@@ -1,28 +1,50 @@
 'use strict';
 
+// Geometry stays in page coordinates, so previews and exports draw the same pattern.
 function drawSpeedLines(c,g,p){
-  if(!p.effect || p.effect==='none') return;
-  c.save();
-  c.globalAlpha=(p.effectStrength ?? 45)/100*.62;
-  c.fillStyle=c.strokeStyle=p.effectColor || '#202630';
-  if(p.effect==='radial'){
-    const positions={center:[.5,.5],top:[.5,.25],bottom:[.5,.75],left:[.25,.5],right:[.75,.5]};
-    const [fx,fy]=positions[p.effectFocus] || positions.center;
-    const x=g.x+g.w*fx,y=g.y+g.h*fy,r=Math.hypot(g.w,g.h);
-    for(let i=0;i<88;i++){
-      const angle=i*Math.PI*2/88+.005*Math.sin(i*13),spread=.004+(i%5)*.002;
-      const inner=(.13+.1*(Math.sin(i*7)+1)/2)*Math.min(g.w,g.h);
-      c.beginPath();c.moveTo(x+Math.cos(angle)*inner,y+Math.sin(angle)*inner);
-      c.lineTo(x+Math.cos(angle-spread)*r,y+Math.sin(angle-spread)*r);
-      c.lineTo(x+Math.cos(angle+spread)*r,y+Math.sin(angle+spread)*r);
-      c.closePath();c.fill();
+  if(!p.effect || p.effect==='none')return;
+  const density=(p.effectDensity ?? 50)/100,angle=(p.effectAngle ?? -9)*Math.PI/180;
+  const x=g.x+g.w*(p.effectX ?? 50)/100,y=g.y+g.h*(p.effectY ?? 50)/100;
+  const radius=Math.hypot(g.w,g.h),width=p.effectWidth ?? 2;
+  const noise=i=>(Math.sin(i*12.9898+78.233)*43758.5453)%1;
+  c.save();c.globalAlpha=(p.effectStrength ?? 45)/100*.72;
+  c.fillStyle=c.strokeStyle=p.effectColor || '#202630';c.lineCap='round';
+  c.translate(x,y);c.rotate(angle);
+  if(p.effect==='radial'||p.effect==='burst'){
+    const count=Math.round(16+density*164),inner=(p.effectSpace ?? 24)/100*Math.min(g.w,g.h);
+    for(let i=0;i<count;i++){
+      const theta=i*Math.PI*2/count+.01*noise(i);
+      const spread=width/radius*(p.effect==='burst'?1.8:.7)*(1+(i%4)*.3);
+      const from=inner*(p.effect==='burst'?(i%2?.6:1.35):(.85+.3*Math.abs(noise(i))));
+      c.beginPath();c.moveTo(Math.cos(theta)*from,Math.sin(theta)*from);
+      c.lineTo(Math.cos(theta-spread)*radius,Math.sin(theta-spread)*radius);
+      c.lineTo(Math.cos(theta+spread)*radius,Math.sin(theta+spread)*radius);c.closePath();c.fill();
     }
-  }else{
-    for(let i=0;i<58;i++){
-      const y=g.y-50+i*(g.h+100)/58,from=g.x+(.02+(i%7)*.04)*g.w;
-      const length=g.w*(.35+(i%6)*.11);
-      c.lineWidth=.8+(i%5)*.65;c.beginPath();c.moveTo(from,y);
-      c.lineTo(from+length,y-length*.16);c.stroke();
+  }else if(p.effect==='motion'||p.effect==='rain'){
+    const count=Math.round(10+density*110),length=radius*(p.effectLength ?? 70)/100;
+    for(let i=0;i<count;i++){
+      const yy=-radius+i*radius*2/count;
+      const start=-length*.7+noise(i)*radius*.32;
+      c.lineWidth=width*(.45+(i%5)*.22);c.beginPath();
+      if(p.effect==='rain'){
+        c.setLineDash([length*(.05+(i%4)*.018),length*.13]);c.lineDashOffset=noise(i)*length;
+        c.moveTo(-radius,yy);c.lineTo(radius,yy);
+      }else{c.moveTo(start,yy);c.lineTo(start+length*(.65+(i%4)*.12),yy);}
+      c.stroke();
+    }
+  }else if(p.effect==='spiral'){
+    const count=Math.round(4+density*32),inner=(p.effectSpace ?? 24)/100*Math.min(g.w,g.h);
+    for(let i=0;i<count;i++){
+      c.lineWidth=width*(.6+(i%3)*.3);c.beginPath();
+      for(let j=0;j<=64;j++){const t=j/64,r=inner+(radius-inner)*t,theta=i*Math.PI*2/count+t*2.4;const xx=Math.cos(theta)*r,yy=Math.sin(theta)*r;if(j)c.lineTo(xx,yy);else c.moveTo(xx,yy);}
+      c.stroke();
+    }
+  }else if(p.effect==='dots'){
+    const spacing=radius/(7+density*30),dot=width*.9+spacing*.055;
+    for(let row=-40;row<=40;row++)for(let col=-40;col<=40;col++){
+      const xx=col*spacing+(row%2)*spacing/2,yy=row*spacing*.866;
+      if(Math.abs(xx)>radius||Math.abs(yy)>radius)continue;
+      c.beginPath();c.arc(xx,yy,dot,0,Math.PI*2);c.fill();
     }
   }
   c.restore();

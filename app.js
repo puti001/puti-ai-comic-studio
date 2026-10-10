@@ -27,7 +27,11 @@ const stickerPresets=[
  {text:'WOW!',fill:'#ffe08a',color:'#202630',rotate:9},
  {text:'沙沙…',fill:'#e1def1',color:'#65598c',rotate:-6}
 ];
-const newPanel=(photo=null)=>({photo,zoom:1,x:0,y:0,effect:'none',effectStrength:45,effectColor:'#202630',effectFocus:'center'});
+const effectDefaults={effect:'none',effectStrength:45,effectColor:'#202630',effectFocus:'center',effectAngle:-9,effectDensity:50,effectWidth:2,effectLength:70,effectSpace:24,effectX:50,effectY:50};
+const effectPositions={center:[50,50],top:[50,25],bottom:[50,75],left:[25,50],right:[75,50]};
+const effectTypes=['none','radial','motion','burst','spiral','rain','dots'];
+const effectRanges={effectAngle:[-180,180,'°'],effectDensity:[5,100,'%'],effectWidth:[1,10,' px'],effectLength:[10,100,'%'],effectSpace:[5,65,'%'],effectX:[0,100,'%'],effectY:[0,100,'%']};
+const newPanel=(photo=null)=>({photo,zoom:1,x:0,y:0,...effectDefaults});
 const borderTypes=[['classic','經典墨線','solid'],['bold','粗黑漫畫','solid'],['double','雙線邊框','double'],['dash','虛線手帳','dashed'],['round','圓角分格','solid'],['rough','手繪筆觸','solid'],['color','彩色故事','solid'],['none','無框留白','none']];
 // Keep original IDs so existing saved projects retain their page shape.
 const pageRatios={
@@ -47,14 +51,14 @@ function syncExportInfo(){
   $('exportSummary').textContent=`整頁 ${pageRatios[state.ratio].label} · ${canvas.width*scale} × ${canvas.height*scale} px`;
 }
 const defaults=()=>({template:0,panels:Array.from({length:6},()=>newPanel()),photos:[],bubbles:[],border:'classic',borderWidth:5,gap:16,ink:'#202630',paper:'#ffffff',ratio:'portrait',title:'我的漫畫故事'});
-let state=defaults(),selected=0,selectedBubble=null,photoCache=new Map(),history=[],historyIndex=-1,drag=null,toastTimer;
+let state=defaults(),selected=0,selectedBubble=null,photoCache=new Map(),history=[],historyIndex=-1,drag=null,toastTimer,effectPositioning=false;
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const uid=()=>crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2);
 const cloneState=s=>({...s,photos:s.photos.map(p=>({...p})),panels:s.panels.map(p=>({...p})),bubbles:s.bubbles.map(b=>({...b}))});
 const snapshot=()=>({state:cloneState(state),signature:JSON.stringify({...state,photos:state.photos.map(({id,name})=>({id,name}))})});
 function commit(){const value=snapshot();if(history[historyIndex]?.signature===value.signature)return;history=history.slice(0,historyIndex+1);history.push(value);if(history.length>32)history.shift();historyIndex=history.length-1;syncHistory();}
 function syncHistory(){$('undo').disabled=historyIndex<=0;$('redo').disabled=historyIndex>=history.length-1;}
-function restoreHistory(delta){const i=historyIndex+delta;if(i<0||i>=history.length)return;historyIndex=i;state=cloneState(history[i].state);selected=clamp(selected,0,state.panels.length-1);selectedBubble=null;syncAll();}
+function restoreHistory(delta){const i=historyIndex+delta;if(i<0||i>=history.length)return;historyIndex=i;effectPositioning=false;state=cloneState(history[i].state);selected=clamp(selected,0,state.panels.length-1);selectedBubble=null;syncAll();}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),3300);}
 function polygonPath(c,points){c.beginPath();points.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.closePath();}
 function inset(points,d){const lines=points.map((p,i)=>{const q=points[(i+1)%points.length],dx=q[0]-p[0],dy=q[1]-p[1],len=Math.hypot(dx,dy);return {p:[p[0]-dy/len*d,p[1]+dx/len*d],v:[dx,dy]};});return lines.map((b,i)=>{const a=lines[(i+lines.length-1)%lines.length],den=a.v[0]*b.v[1]-a.v[1]*b.v[0];if(Math.abs(den)<1e-6)return b.p;const dx=b.p[0]-a.p[0],dy=b.p[1]-a.p[1],t=(dx*b.v[1]-dy*b.v[0])/den;return[a.p[0]+a.v[0]*t,a.p[1]+a.v[1]*t];});}
@@ -90,8 +94,14 @@ function syncSelection(){
   $('effectStrengthValue').textContent=(p.effectStrength ?? 45)+'%';
   $('effectColor').value=p.effectColor || '#202630';
   $('effectFocus').value=p.effectFocus || 'center';
-  $('focusLabel').hidden=effect!=='radial';
-  ['effectStrength','effectColor','copyEffect'].forEach(id=>$(id).disabled=effect==='none');
+  const radial=['radial','burst','spiral'].includes(effect);
+  $('focusLabel').hidden=!radial;$('effectSpaceControl').hidden=!radial;
+  $('effectLengthControl').hidden=!['motion','rain'].includes(effect);
+  for(const [id,[min,max,suffix]] of Object.entries(effectRanges)){$(id).value=p[id] ?? effectDefaults[id];$(id+'Value').textContent=(p[id] ?? effectDefaults[id])+suffix;}
+  ['effectStrength','effectColor','effectFocus','copyEffect','resetEffect','placeEffect',...Object.keys(effectRanges)].forEach(id=>$(id).disabled=effect==='none');
+  if(effect==='none')effectPositioning=false;
+  $('placeEffect').classList.toggle('active',effectPositioning);$('placeEffect').setAttribute('aria-pressed',String(effectPositioning));$('placeEffect').textContent=effectPositioning?'請點選目前分格 · 再按可取消':'⌖ 點畫布設定位置';
+  canvas.classList.toggle('effect-positioning',effectPositioning);
   const b=currentBubble();
   for(const id of ['bubbleText','fontSize','bubbleWidth','bubbleRotation','textColor','bubbleColor','deleteBubble'])$(id).disabled=!b;
   if(b){
@@ -103,7 +113,7 @@ function syncSelection(){
   renderBubbleList();
 }
 function renderBubbleList(){$('bubbleList').replaceChildren();state.bubbles.forEach(b=>{const button=document.createElement('button');button.textContent=b.text.replaceAll('\n',' ')||'空白文字框';button.dataset.bubble=b.id;button.classList.toggle('active',b.id===selectedBubble);$('bubbleList').append(button);});}
-function setPane(pane){document.querySelectorAll('#inspectorTabs button').forEach(b=>b.classList.toggle('active',b.dataset.pane===pane));['photos','style','text','effects'].forEach(p=>$(p+'Pane').hidden=p!==pane);}
+function setPane(pane){if(pane!=='effects'&&effectPositioning){effectPositioning=false;syncSelection();}document.querySelectorAll('#inspectorTabs button').forEach(b=>b.classList.toggle('active',b.dataset.pane===pane));['photos','style','text','effects'].forEach(p=>$(p+'Pane').hidden=p!==pane);}
 function syncAll(){const size=pageRatios[state.ratio];canvas.width=size.width;canvas.height=size.height;syncExportInfo();$('templateCount').textContent=templates.length+' 款';$('layoutName').textContent=templates[state.template].name;$('panelCount').textContent=state.panels.length+' 格';$('borderWidth').value=state.borderWidth;$('borderValue').textContent=state.borderWidth+' px';$('gap').value=state.gap;$('gapValue').textContent=state.gap+' px';$('ink').value=state.ink;$('paper').value=state.paper;$('ratio').value=state.ratio;$('workTitle').value=state.title;renderTemplates();renderBorders();renderShelf();syncSelection();syncHistory();render();}
 function setTemplate(id){if(id===state.template)return;const n=templates[id].polys.length;const lost=state.panels.slice(n).filter(p=>p.photo).length;state.template=id;state.panels=Array.from({length:n},(_,i)=>state.panels[i]||newPanel());selected=clamp(selected,0,n-1);selectedBubble=null;commit();syncAll();toast(lost?'已切換版型，多出的照片仍保留在照片庫。':`已換成「${templates[id].name}」`);}
 function placePhoto(id,index=selected){if(!state.photos.some(p=>p.id===id))return;selected=index;selectedBubble=null;state.panels[index]={...newPanel(),...state.panels[index],photo:id,zoom:1,x:0,y:0};commit();syncSelection();render();toast(`照片已放入第 ${index+1} 格`);}
@@ -111,7 +121,7 @@ function loadImage(src){return new Promise((resolve,reject)=>{const img=new Imag
 async function addFiles(files,target=null){const list=Array.from(files).filter(f=>f.type.startsWith('image/'));if(!list.length){toast('請選擇圖片檔案。');return;}const capacity=60-state.photos.length;if(capacity<=0){toast('照片庫已達 60 張，請先移除一些照片。');return;}let added=0,failed=0;for(const file of list.slice(0,capacity)){try{if(file.size>25*1024*1024)throw new Error('too large');const url=URL.createObjectURL(file);let img;try{img=await loadImage(url);}finally{URL.revokeObjectURL(url);}const resize=document.createElement('canvas'),scale=Math.min(1,3000/Math.max(img.width,img.height));resize.width=Math.max(1,Math.round(img.width*scale));resize.height=Math.max(1,Math.round(img.height*scale));resize.getContext('2d').drawImage(img,0,0,resize.width,resize.height);const src=resize.toDataURL('image/png'),id=uid(),decoded=await loadImage(src);photoCache.set(id,decoded);state.photos.push({id,name:file.name,src});if(target!==null&&target+added<state.panels.length){state.panels[target+added]={...newPanel(),...state.panels[target+added],photo:id,zoom:1,x:0,y:0};}added++;}catch{failed++;}}commit();renderShelf();syncSelection();render();toast(`${added} 張照片已加入${failed?'；部分圖片讀取失敗或超過 25 MB':''}${list.length>capacity?'；照片庫最多 60 張':''}`);}
 function eventPoint(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*canvas.width,y:(e.clientY-r.top)/r.height*canvas.height};}
 function frameAt(pt){const frames=geometry();for(let i=frames.length-1;i>=0;i--)if(inside(pt,frames[i].pts))return i;return -1;}
-canvas.addEventListener('pointerdown',e=>{const pt=eventPoint(e);for(const b of [...state.bubbles].reverse()){const g=bubbleGeometry(ctx,b);if(bubbleHit(pt,b)){selectedBubble=b.id;drag={kind:'bubble',id:b.id,start:pt,x:g.x/canvas.width,y:g.y/canvas.height};canvas.setPointerCapture(e.pointerId);setPane('text');syncSelection();render();return;}}const i=frameAt(pt);if(i<0)return;selected=i;selectedBubble=null;const p=state.panels[i];if(p.photo){drag={kind:'photo',index:i,start:pt,x:p.x,y:p.y};canvas.setPointerCapture(e.pointerId);}syncSelection();render();});
+canvas.addEventListener('pointerdown',e=>{const pt=eventPoint(e);if(effectPositioning){const g=geometry()[selected];if(!inside(pt,g.pts)){toast('請點選目前選取的分格。');return;}const p=state.panels[selected];p.effectX=Math.round(clamp((pt.x-g.x)/g.w*100,0,100));p.effectY=Math.round(clamp((pt.y-g.y)/g.h*100,0,100));p.effectFocus='custom';effectPositioning=false;commit();syncSelection();render();toast('特效位置已更新。');return;}for(const b of [...state.bubbles].reverse()){const g=bubbleGeometry(ctx,b);if(bubbleHit(pt,b)){selectedBubble=b.id;drag={kind:'bubble',id:b.id,start:pt,x:g.x/canvas.width,y:g.y/canvas.height};canvas.setPointerCapture(e.pointerId);setPane('text');syncSelection();render();return;}}const i=frameAt(pt);if(i<0)return;selected=i;selectedBubble=null;const p=state.panels[i];if(p.photo){drag={kind:'photo',index:i,start:pt,x:p.x,y:p.y};canvas.setPointerCapture(e.pointerId);}syncSelection();render();});
 canvas.addEventListener('pointermove',e=>{if(!drag)return;const pt=eventPoint(e),dx=pt.x-drag.start.x,dy=pt.y-drag.start.y;if(drag.kind==='photo'){const p=state.panels[drag.index],g=geometry()[drag.index],m=imageMetrics(p,g);if(m){p.x=clamp(drag.x+dx/g.w,-m.maxX,m.maxX);p.y=clamp(drag.y+dy/g.h,-m.maxY,m.maxY);}}else{const b=state.bubbles.find(b=>b.id===drag.id),g=bubbleGeometry(ctx,b);b.x=clamp(drag.x+dx/canvas.width,4/canvas.width,(canvas.width-g.w-4)/canvas.width);b.y=clamp(drag.y+dy/canvas.height,4/canvas.height,Math.max(4,canvas.height-g.h-28)/canvas.height);}render();});
 function finishDrag(){if(drag){drag=null;commit();}}canvas.addEventListener('pointerup',finishDrag);canvas.addEventListener('pointercancel',finishDrag);
 canvas.addEventListener('wheel',e=>{if(selectedBubble||!state.panels[selected].photo)return;e.preventDefault();const p=state.panels[selected];p.zoom=clamp(p.zoom+(e.deltaY<0?.08:-.08),1,3);syncSelection();render();clearTimeout(canvas.wheelTimer);canvas.wheelTimer=setTimeout(commit,250);},{passive:false});
@@ -153,15 +163,18 @@ document.querySelectorAll('[data-effect]').forEach(button=>button.onclick=()=>{
 rangeBind('effectStrength',n=>{state.panels[selected].effectStrength=n;$('effectStrengthValue').textContent=n+'%';});
 $('effectColor').oninput=()=>{state.panels[selected].effectColor=$('effectColor').value;render();};
 $('effectColor').onchange=commit;
-$('effectFocus').onchange=()=>{state.panels[selected].effectFocus=$('effectFocus').value;commit();render();};
+for(const [id,[min,max,suffix]] of Object.entries(effectRanges))rangeBind(id,n=>{const p=state.panels[selected];p[id]=n;$(id+'Value').textContent=n+suffix;if(id==='effectX'||id==='effectY'){p.effectFocus='custom';$('effectFocus').value='custom';}});
+$('effectFocus').onchange=()=>{const p=state.panels[selected],focus=$('effectFocus').value;p.effectFocus=focus;if(effectPositions[focus])[p.effectX,p.effectY]=effectPositions[focus];commit();syncSelection();render();};
+$('placeEffect').onclick=()=>{effectPositioning=!effectPositioning;syncSelection();if(effectPositioning)toast('點選目前分格中的位置，設定特效中心。');};
+$('resetEffect').onclick=()=>{const p=state.panels[selected],kind=p.effect;Object.assign(p,effectDefaults,{effect:kind});effectPositioning=false;commit();syncSelection();render();};
 $('copyEffect').onclick=()=>{
   const p=state.panels[selected];
-  state.panels.forEach(frame=>Object.assign(frame,{effect:p.effect,effectStrength:p.effectStrength ?? 45,effectColor:p.effectColor || '#202630',effectFocus:p.effectFocus || 'center'}));
-  commit();render();toast('速度線已套用到全部分格。');
+  state.panels.forEach(frame=>{for(const key of Object.keys(effectDefaults))frame[key]=p[key] ?? effectDefaults[key];});
+  commit();render();toast('特效與所有設定已套用到全部分格。');
 };
 $('bubbleText').oninput=()=>{const b=currentBubble();if(b){b.text=$('bubbleText').value;render();renderBubbleList();}};$('bubbleText').onchange=commit;rangeBind('fontSize',n=>{const b=currentBubble();if(b){b.font=n;$('fontValue').textContent=n+' px';}});rangeBind('bubbleWidth',n=>{const b=currentBubble();if(b){b.width=n;$('bubbleWidthValue').textContent=n+' px';}});[['textColor','color'],['bubbleColor','fill']].forEach(([id,key])=>{$(id).oninput=()=>{const b=currentBubble();if(b){b[key]=$(id).value;render();}};$(id).onchange=commit;});
 function deleteBubble(){state.bubbles=state.bubbles.filter(b=>b.id!==selectedBubble);selectedBubble=null;commit();syncSelection();render();}$('deleteBubble').onclick=deleteBubble;$('bubbleList').onclick=e=>{const b=e.target.closest('[data-bubble]');if(b){selectedBubble=b.dataset.bubble;syncSelection();render();}};
-document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();restoreHistory(e.shiftKey?1:-1);}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();restoreHistory(1);}else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();if(selectedBubble)deleteBubble();else $('removePhoto').click();}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&effectPositioning){effectPositioning=false;syncSelection();return;}if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();restoreHistory(e.shiftKey?1:-1);}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();restoreHistory(1);}else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();if(selectedBubble)deleteBubble();else $('removePhoto').click();}});
 function outputCanvas(scale=1){const out=document.createElement('canvas');out.width=canvas.width*scale;out.height=canvas.height*scale;const c=out.getContext('2d');c.scale(scale,scale);draw(c,false);return out;}
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 function safeName(){return (state.title||'我的漫畫故事').replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').slice(0,60);}
@@ -179,10 +192,10 @@ function validateProject(raw){
     if(!p||typeof p.id!=='string'||ids.has(p.id)||typeof p.name!=='string'||typeof p.src!=='string'||!/^data:image\/(png|jpeg|webp);base64,/.test(p.src))throw new Error('無效照片');
     ids.add(p.id);
   }
-  const panels=s.panels.map(p=>({...newPanel(),...p}));
+  const panels=s.panels.map(p=>{const frame={...newPanel(),...p};if(p.effectX===undefined&&p.effectY===undefined)[frame.effectX,frame.effectY]=effectPositions[p.effectFocus] || [50,50];return frame;});
   for(const p of panels){
     if(p.photo!==null&&!ids.has(p.photo)||!finite(p.zoom,1,3)||!finite(p.x,-10000,10000)||!finite(p.y,-10000,10000))throw new Error('無效分格');
-    if(!['none','radial','motion'].includes(p.effect)||!finite(p.effectStrength,5,100)||!color(p.effectColor)||!['center','top','bottom','left','right'].includes(p.effectFocus))throw new Error('無效特效');
+    if(!effectTypes.includes(p.effect)||!finite(p.effectStrength,5,100)||!color(p.effectColor)||!['center','top','bottom','left','right','custom'].includes(p.effectFocus)||!Object.entries(effectRanges).every(([id,[min,max]])=>finite(p[id],min,max)))throw new Error('無效特效');
   }
   const bubbles=s.bubbles.map(b=>({rotate:0,...b})),bids=new Set();
   for(const b of bubbles){

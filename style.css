@@ -248,3 +248,13 @@ dialog p { color: #4f5b6b; font-size: 16px; }
 #ratioHint { color: #485569; font-size: 14px; }
 .export-summary { padding: 12px; border: 2px solid var(--ink); border-radius: 8px; background: #fff3b6; font-size: 16px; font-weight: 800; }
 @media (max-width: 650px) { .page-settings { gap: 8px; padding: 12px; } .page-settings select { width: 100%; } #ratioHint { font-size: 14px; } }
+
+.control-help { font-size: 14px; color: var(--muted); margin: 5px 0 12px; }
+.effect-position { padding: 14px 0; margin-top: 16px; border-top: 2px solid #dbe1ea; border-bottom: 2px solid #dbe1ea; }
+.effect-position h3 { margin: 0 0 12px; }
+#placeEffect { margin-top: 14px; background: #b7e3f2; }
+#placeEffect.active { background: var(--yellow); box-shadow: 3px 3px 0 var(--ink); }
+#comic.effect-positioning { cursor: crosshair; outline: 4px solid #168ab5; outline-offset: 3px; }
+
+.effect-options [data-effect="none"] { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 9px; min-height: 44px; }
+.effect-options [data-effect="none"] span { font-size: 26px; margin: 0; line-height: 1; }
